@@ -1,0 +1,31 @@
+{
+  "keys": [
+    {
+      "kty": "EC",
+      "kid": "ecdsa_prime256v1_public",
+      "crv": "P-256",
+      "x": "TBEBA2BybXnzW_12v524SaV_x6ZEBvxZSuNSGaCKc3I",
+      "y": "t1VsgsEecLKbG98kBAFbN-S8Z8lMGyKrHrAbQTz0720"
+    },
+    {
+      "kty": "EC",
+      "kid": "ecdsa_secp384r1_public",
+      "crv": "P-384",
+      "x": "EuzhH41-OyWSXBZk8IBjO64PMQuoghSopL2FpkDvTAVY6eGFvyzz_tqTGC269MgA",
+      "y": "4SLVBiQRWCG2-2Vvv9GDnnl6ON35PlAGmgMMyXZVPwvgioKqyColnIsMswPxrQO2"
+    },
+    {
+      "kty": "EC",
+      "kid": "ecdsa_secp521r1_public",
+      "crv": "P-521",
+      "x": "AaFzUoVgSwzvJ0rJ884JK85kApgQdNjqUqGiBhmwD0bcLE3ZDGTTBeBx6wjBqBeeWiSAbSrDJUJwZL_lrlM45-XR",
+      "y": "APByNOWQinGVqSc5A2Oil7k85ip9bNeOR5LmQht2qLVsfkfpNpGn6Ke2wfSTp1rCP_oY048wJefhww2etAzVUBw8"
+    },
+    {
+      "kty": "RSA",
+      "kid": "rsa_public",
+      "n": "nwafJsdFdDZCKG9bgw7AJ9So_622Q_Gt9ClWH-uvYtv-ZwPQF3Bna4ibiAxT7kKlRMz1xusFFGNnb5wpI-r-AJa2H9gUcRbdNQurHTReB3W95hV3IeOlETbZcHDxglOqKaRU8QM92xhjiwD2eNfGNgNlYagGw5PsgpiJQkfA_KKAr8qI91FZMr6mtEvVb00eZHd6CqjM3HiNAIadLJAaE0gOXkGFXqRo-dEdpNHfuvTkwc5oHZPXNugVlZ9ncrlBAXYmI4TSN5eC6Kq0B92xK4mw64TqfKsvsMpcKg1Ek7SIVcYEmthdBTKtwc5NCEtoiWGmKvxWEUy4Wq-0AfRJlw",
+      "e": "AQAB"
+    }
+  ]
+}

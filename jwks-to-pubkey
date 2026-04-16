@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+yellow() {
+  echo -ne "\033[33m"
+  echo -n "$@"
+  echo -e "\033[0m"
+}
+
+green() {
+  echo -ne "\033[32m"
+  echo -n "$@"
+  echo -e "\033[0m"
+}
+
+red() {
+  echo -ne "\033[31m"
+  echo -n "$@"
+  echo -e "\033[0m"
+}
+
+fail() {
+  echo "$@" >&2
+  exit 1
+}
+
+base64url_decode() {
+  local input
+  input="$(cat)"
+
+  input="${input//-/+}"
+  input="${input//_//}"
+
+  local mod=$(( ${#input} % 4 ))
+  if [ $mod -eq 2 ]; then
+    input="${input}=="
+  elif [ $mod -eq 3 ]; then
+    input="${input}="
+  fi
+
+  echo -n "$input" | base64 -d
+}
+
+read_jwks() {
+  declare jwks="$1"
+
+  if [ -f "$jwks" ]; then
+    cat "$jwks"
+  elif [ "${jwks:0:8}" == "https://" ]; then
+    curl -sSf "$jwks"
+  else
+    fail "JWKS source not a file or URL: $(yellow "$jwks")"
+  fi
+}
+
+asn1_der_encode_length() {
+  declare length="$1"
+
+  if (( length <= 0x80 )); then
+    printf "%02X" "$length"
+  else
+    local hex_length
+    hex_length="$(printf "%x" "$length")"
+    # zero pad for even length:
+    if (( ${#hex_length} % 2 != 0 )); then
+      hex_length="0${hex_length}"
+    fi
+
+    local num_bytes
+    num_bytes=$(( ${#hex_length} / 2 ))
+
+    printf "%02X" $(( 0x80 | num_bytes ))
+
+    local i=0
+    while (( i < ${#hex_length} )); do
+      printf "%s" "${hex_length:i:2}"
+      i=$(( i + 2 ))
+    done
+  fi | xxd -r -p
+}
+
+asn1_datastructure() {
+  declare type="$1"
+
+  echo -n "$type"
+
+  local data
+  data="$(cat | base64)"
+  local data_length
+  # bash can’t handle or even count null values :shrug:
+  data_length="$(echo "$data" | base64 -d | LC_CTYPE=C LC_ALL=C sed s/././g)"
+
+  asn1_der_encode_length "${#data_length}"
+  echo -n "$data" | base64 -d
+}
+
+asn1_sequence() {
+  asn1_datastructure $'\x30'
+}
+
+asn1_nothing() {
+  asn1_datastructure $'\x05' </dev/null
+}
+
+asn1_bitstring_positive() {
+  { printf "\x00"; cat; } | asn1_datastructure $'\x03'
+}
+
+asn1_integer() {
+  asn1_datastructure $'\x02'
+}
+
+asn1_integer_positive() {
+  { printf "\x00"; cat; } | asn1_integer
+}
+
+asn1_object_identifier() {
+  declare oid="$1"
+  # https://misc.daniel-marschall.de/asn.1/oid-converter/online.php
+  case "$oid" in
+    "rsaEncryption")
+      # https://oid-base.com/get/1.2.840.113549.1.1.1
+      printf "\x2A\x86\x48\x86\xF7\x0D\x01\x01\x01"
+      ;;
+    "id-ecPublicKey")
+      # https://oid-base.com/get/1.2.840.10045.2.1
+      printf "\x2A\x86\x48\xCE\x3D\x02\x01"
+      ;;
+    "P-256")
+      # https://std.neuromancer.sk/nist/P-256
+      printf "\x2A\x86\x48\xCE\x3D\x03\x01\x07"
+      ;;
+    "P-384")
+      # https://std.neuromancer.sk/nist/P-384
+      printf "\x2B\x81\x04\x00\x22"
+      ;;
+    "P-521")
+      # https://std.neuromancer.sk/nist/P-521
+      printf "\x2B\x81\x04\x00\x23"
+      ;;
+    *)
+      fail "unsupported object identifier $(yellow "$oid")"
+  esac | asn1_datastructure $'\x06'
+}
+
+pem_wrapper() {
+  asn1_sequence | base64 | fold -w 64
+}
+
+generate_rsa() {
+  declare key="$1"
+
+  local mod exp
+  mod="$(jq -r .n <<<"$key")"
+  exp="$(jq -r .e <<<"$key")"
+
+  {
+    asn1_object_identifier "rsaEncryption"
+    asn1_nothing
+  } | asn1_sequence
+
+  {
+    echo "$mod" | base64url_decode | asn1_integer_positive
+    echo "$exp" | base64url_decode | asn1_integer
+  } | asn1_sequence | asn1_bitstring_positive
+}
+
+generate_ec() {
+  declare key="$1"
+
+  local crv x y
+  crv="$(jq -r .crv <<<"$key")"
+  x="$(jq -r .x <<<"$key")"
+  y="$(jq -r .y <<<"$key")"
+
+  {
+    asn1_object_identifier "id-ecPublicKey"
+    asn1_object_identifier "$crv"
+  } | asn1_sequence
+
+  {
+    printf "\x04" # compressed form
+    echo "$x" | base64url_decode
+    echo "$y" | base64url_decode
+  } | asn1_bitstring_positive
+}
+
+write_single_key() {
+  declare output_dir="$1" key="$2"
+
+  local kty kid payload
+  kid="$(jq -r .kid <<<"$key")"
+  kty="$(jq -r .kty <<<"$key")"
+
+  if [ -z "$kid" ]; then
+    fail "Key does not have an ID, cannot save"
+  fi
+
+  case "$kty" in
+    "RSA")
+      payload="$(generate_rsa "$key" | pem_wrapper)"
+      ;;
+    "EC")
+      payload="$(generate_ec "$key" | pem_wrapper)"
+      ;;
+    *)
+      fail "Unsupported key type $(yellow "$kty") for key $(yellow "$kid")"
+      ;;
+  esac
+
+  local output_path="$output_dir/$kid.pem"
+  echo "Writing to $(yellow "$output_path")"
+  {
+    echo '-----BEGIN PUBLIC KEY-----'
+    echo "$payload"
+    echo '-----END PUBLIC KEY-----'
+  } > "$output_path"
+}
+
+write_keys() {
+  declare output_dir="$1"
+  local json_line
+
+  while read -r json_line; do
+    write_single_key "$output_dir" "$json_line"
+  done
+}
+
+main() {
+  declare jwks="${1:-/dev/stdin}" output_dir="${2:-.}"
+
+  if [ ! -d "$output_dir" ]; then
+    echo "Creating output directory $(yellow "$output_dir")"
+    mkdir -p "$output_dir"
+  fi
+
+  read_jwks "$jwks" |
+    jq -cM '.keys|.[]' |
+    write_keys "$output_dir"
+}
+
+main "$@"

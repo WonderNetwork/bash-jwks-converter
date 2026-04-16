@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+yellow() {
+  echo -ne "\033[33m"
+  echo -n "$@"
+  echo -e "\033[0m"
+}
+
+green() {
+  echo -ne "\033[32m"
+  echo -n "$@"
+  echo -e "\033[0m"
+}
+
+red() {
+  echo -ne "\033[31m"
+  echo -n "$@"
+  echo -e "\033[0m"
+}
+
+fail() {
+  echo "$@" >&2
+  exit 1
+}
+
+read_hex_bytes() {
+  declare details="$1" identifier="$2"
+
+  sed -n -e "/$identifier/",'$p' <<<"$details" | sed -n '/^ /p ' | tr -d "\n: "
+}
+
+read_integer() {
+  declare details="$1" identifier="$2"
+
+  local int
+  int="$(sed -n -e "/$identifier/p" <<<"$details" | cut -d" " -f 2)"
+
+  echo -n "$(printf '%06x' "$int")"
+}
+
+hex_to_base64_url() {
+  xxd -r -p |
+    openssl base64 -A |
+    tr '+/' '-_' |
+    tr -d "="
+}
+
+read_decoded_hex_part() {
+  declare input="$1" line="$2"
+  local len start end
+  len="${#input}"
+  end=$((len/2))
+  start=$(((line-1) * end))
+  echo -n "${input:start:end}" | hex_to_base64_url
+}
+
+convert_rsa() {
+  declare key="$1" details="$2"
+
+  local kid
+  kid="$(basename "$key" ".pem")"
+
+	local mod len
+	mod="$(read_hex_bytes "$details" "Modulus")"
+
+	if [ "${mod:0:2}" != "00" ]; then
+	  fail "Failed to read modulus from RSA key $(yellow "key")"
+	fi
+
+	mod="$(echo "${mod:2}" | hex_to_base64_url)"
+
+	local exp
+	exp="$(read_integer "$details" "Exponent" | hex_to_base64_url)"
+
+  jq -Mn \
+   --arg kty "RSA" \
+   --arg kid "$kid" \
+   --arg n "$mod" \
+   --arg e "$exp" \
+    '{ $kty, $kid, $n, $e }'
+}
+
+convert_ecdsa() {
+  declare key="$1" details="$2"
+
+  local kid
+  kid="$(basename "$key" ".pem")"
+
+  local crv nist_curve_prefix="NIST CURVE: "
+	crv="$(grep "$nist_curve_prefix" <<<"$details")"
+	crv="${crv/#$nist_curve_prefix}"
+
+	local pub
+	pub="$(read_hex_bytes "$details" "pub")"
+
+	if [ "${pub:0:2}" != "04" ]; then
+	  fail "Expected the key $(yellow "$kid") ECDSA key to contain uncompressed curve details"
+  fi
+
+  pub="${pub:2}"
+  local x y
+  x="$(read_decoded_hex_part "$pub" 1)"
+  y="$(read_decoded_hex_part "$pub" 2)"
+
+  jq -Mn \
+    --arg kty "EC" \
+    --arg kid "$kid" \
+    --arg crv "$crv" \
+    --arg x "$x" \
+    --arg y "$y" \
+    '{ $kty, $kid, $crv, $x, $y }'
+}
+
+convert_key() {
+	declare key="$1"
+
+	local details
+	details="$(openssl ec -pubin -in "$key" -text -noout)"
+
+	if grep -q "Modulus" <<<"$details"; then
+		convert_rsa "$key" "$details"
+	elif grep -q "NIST CURVE" <<<"$details"; then
+		convert_ecdsa "$key" "$details"
+	else
+	  fail "$(yellow "$key") has unknown type or unsupported curve"
+	fi
+}
+
+main() {
+  if [ $# -lt 1 ]; then
+    fail "Usage: $0 pubkey.pem [...pubkey.pem]"
+  fi
+
+	for key in "$@"; do
+		convert_key "$key"
+	done | jq -s '{ keys: . }'
+}
+
+main "$@"
