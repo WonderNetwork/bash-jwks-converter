@@ -15,6 +15,20 @@ Convert pubkeys to jwks.json (outputs to stdout):
 pubkey-to-jwks Resources/keys/*.pem
 ```
 
+## System requirements
+
+Check if you have all the required tools:
+
+```sh
+type jq openssl xxd base64 sed grep fold tr cut basename 
+```
+
+Optional:
+
+```sh
+type curl
+```
+
 ## Out of scope
 
 ### Other key formats
