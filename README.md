@@ -20,7 +20,7 @@ pubkey-to-jwks Resources/keys/*.pem
 Check if you have all the required tools:
 
 ```sh
-type jq openssl xxd base64 sed grep fold tr cut basename 
+type jq openssl xxd base64 sed grep tr cut basename 
 ```
 
 Optional:

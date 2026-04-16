@@ -147,7 +147,7 @@ asn1_object_identifier() {
 }
 
 pem_wrapper() {
-  asn1_sequence | base64 | fold -w 64
+  asn1_sequence | base64 -w 64
 }
 
 generate_rsa() {
